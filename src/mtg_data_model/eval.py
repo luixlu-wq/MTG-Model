@@ -30,6 +30,17 @@ def _count_rows(path: str) -> int:
     return count
 
 
+def _is_lfs_pointer(path: str) -> bool:
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path, "rb") as f:
+            head = f.read(256)
+    except OSError:
+        return False
+    return head.startswith(b"version https://git-lfs.github.com/spec/v1")
+
+
 def _char_f1(pred: str, ref: str) -> float:
     if not pred and not ref:
         return 1.0
@@ -122,6 +133,20 @@ def main():
 
     is_adapter_dir = os.path.isdir(args.model) and os.path.exists(os.path.join(args.model, "adapter_config.json"))
     if is_adapter_dir:
+        adapter_sf = os.path.join(args.model, "adapter_model.safetensors")
+        adapter_bin = os.path.join(args.model, "adapter_model.bin")
+        if _is_lfs_pointer(adapter_sf):
+            raise RuntimeError(
+                "adapter_model.safetensors is a Git LFS pointer, not real weights. "
+                "Recover weights with `git lfs pull` in mtg-data-model, or retrain to regenerate checkpoint files. "
+                f"Pointer file: {adapter_sf}"
+            )
+        if not os.path.exists(adapter_sf) and not os.path.exists(adapter_bin):
+            raise RuntimeError(
+                "Adapter checkpoint is missing weight files (adapter_model.safetensors/.bin). "
+                f"Checkpoint path: {args.model}"
+            )
+    if is_adapter_dir:
         from peft import AutoPeftModelForCausalLM
 
         model = AutoPeftModelForCausalLM.from_pretrained(args.model, **model_kwargs)
@@ -144,7 +169,17 @@ def main():
         os.remove(out_path)
     elif os.path.exists(out_path):
         resumed_from = _count_rows(out_path)
-    log.info("eval_output_file=%s resumed_from=%s", out_path, resumed_from)
+    total_rows = _count_rows(args.test)
+    remaining_rows = max(total_rows - resumed_from, 0)
+    planned_rows = min(args.limit, remaining_rows) if args.limit > 0 else remaining_rows
+    log.info(
+        "eval_output_file=%s resumed_from=%s total_rows=%s remaining_rows=%s planned_rows=%s",
+        out_path,
+        resumed_from,
+        total_rows,
+        remaining_rows,
+        planned_rows,
+    )
 
     count = 0
     latencies_ms: list[float] = []
@@ -156,6 +191,19 @@ def main():
     for idx, row in enumerate(_load(args.test)):
         if idx < resumed_from:
             continue
+        in_run_idx = count + 1
+        global_progress = (idx + 1) / total_rows * 100.0 if total_rows > 0 else 0.0
+        run_progress = (in_run_idx / planned_rows * 100.0) if planned_rows > 0 else 0.0
+        spot_name = (((row.get("meta") or {}).get("name")) or "").strip()
+        log.info(
+            "eval_row_start row_idx=%s written_idx=%s run_idx=%s global_progress=%.2f%% run_progress=%.2f%% name=%s",
+            idx,
+            resumed_from + count,
+            in_run_idx,
+            global_progress,
+            run_progress,
+            spot_name if spot_name else "-",
+        )
         messages = row["messages"][:-1] if row["messages"] and row["messages"][-1]["role"] == "assistant" else row["messages"]
         text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = tok([text], return_tensors="pt")
@@ -201,10 +249,13 @@ def main():
             f.write(json.dumps(metric_row, ensure_ascii=False) + "\n")
         count += 1
         if args.log_every > 0 and (count % args.log_every == 0):
-            spot_name = (((row.get("meta") or {}).get("name")) or "").strip()
             log.info(
-                "eval_row row_idx=%s name=%s prompt_tok=%s out_tok=%s latency_ms=%.1f tok_s=%.2f char_f1=%s seq_ratio=%s exact=%s",
+                "eval_row_done row_idx=%s run_idx=%s/%s global_progress=%.2f%% run_progress=%.2f%% name=%s prompt_tok=%s out_tok=%s latency_ms=%.1f tok_s=%.2f char_f1=%s seq_ratio=%s exact=%s",
                 idx,
+                count,
+                planned_rows if planned_rows > 0 else remaining_rows,
+                global_progress,
+                run_progress,
                 spot_name if spot_name else "-",
                 metric_row["prompt_tokens"],
                 metric_row["output_tokens"],
