@@ -1,0 +1,30 @@
+{
+  "train_log": "log\\train-20260216165502.log",
+  "metrics_file": "log\\train-20260216165502.metrics.jsonl",
+  "report_json": "data\\report\\train-report-20260216211027.json",
+  "report_markdown": "data\\report\\train-report-20260216211027.md",
+  "charts": [],
+  "rows_total": 258,
+  "train_rows": 254,
+  "eval_rows": 3,
+  "steps_completed": 254,
+  "epochs_completed": 2.0,
+  "start_loss_avg": 0.902628,
+  "end_loss_avg": 0.174262,
+  "loss_reduction_ratio": 0.806939,
+  "best_eval_loss": 0.171783,
+  "best_eval_step": 254,
+  "final_eval_loss": 0.171783,
+  "final_eval_ppl": 1.18742,
+  "grad_norm_median": 0.173587,
+  "grad_norm_max": 1.394548,
+  "lr_start": 0.0001,
+  "lr_end": 3.937e-07,
+  "step_time_head_avg_s": 11.854,
+  "step_time_tail_avg_s": 84.163,
+  "step_time_median_s": 66.728,
+  "verdict": "good",
+  "recommendations": [
+    "Step latency increased significantly; reduce max_len or check I/O and thermal throttling."
+  ]
+}

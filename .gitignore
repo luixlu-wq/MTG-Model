@@ -16,4 +16,4 @@ venv/
 log/
 
 # Data
-/data/
+#data/
